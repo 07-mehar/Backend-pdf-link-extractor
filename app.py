@@ -114,6 +114,11 @@ def merge_pdfs(pdf_paths, output_path):
     except Exception as e:
         print(f"[WARN] Couldn't read merged PDF: {e}")
 
+@app.route('/')
+def home():
+    return "✅ PDF Link Extractor Backend is running!"
+
+
 @app.route('/upload', methods=['POST'])
 def upload_pdf():
     try:
