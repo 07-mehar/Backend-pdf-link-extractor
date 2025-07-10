@@ -7,6 +7,7 @@ import requests
 from PyPDF2 import PdfMerger, PdfReader
 import re
 from urllib.parse import urlparse, urlunparse
+import time
 
 app = Flask(__name__)
 CORS(app)
@@ -48,27 +49,36 @@ def extract_links_from_pdf(filepath):
 def download_pdfs(links):
     file_paths = []
     for url in links:
-        try:
-            print(f"\n[INFO] Trying to download: {url}")
-            r = requests.get(url, timeout=10)
-            content_type = r.headers.get("Content-Type", "")
-            first_bytes = r.content[:10]
+        retries = 3
+        backoff = 3  # seconds
+        for attempt in range(retries):
+            try:
+                print(f"\n[INFO] Trying to download: {url} (Attempt {attempt + 1})")
+                r = requests.get(url, timeout=30)  # increase timeout
 
-            if r.status_code == 200 and content_type.startswith("application/pdf") and b"%PDF" in first_bytes:
-                filename = f"{uuid.uuid4()}.pdf"
-                filepath = os.path.join(DOWNLOADS_FOLDER, filename)
-                with open(filepath, "wb") as f:
-                    f.write(r.content)
-                file_size = os.path.getsize(filepath)
-                print(f"[SUCCESS] Saved PDF {filename} - {file_size} bytes")
-                file_paths.append(filepath)
-            else:
-                print(f"[SKIPPED] Not a valid PDF: {url}")
-                print(f"Status: {r.status_code}, Content-Type: {content_type}, First bytes: {first_bytes}")
-        except Exception as e:
-            print(f"[ERROR] {url} failed: {e}")
+                content_type = r.headers.get("Content-Type", "")
+                first_bytes = r.content[:10]
+
+                if r.status_code == 200 and content_type.startswith("application/pdf") and b"%PDF" in first_bytes:
+                    filename = f"{uuid.uuid4()}.pdf"
+                    filepath = os.path.join(DOWNLOADS_FOLDER, filename)
+                    with open(filepath, "wb") as f:
+                        f.write(r.content)
+                    file_size = os.path.getsize(filepath)
+                    print(f"[SUCCESS] Saved PDF {filename} - {file_size} bytes")
+                    file_paths.append(filepath)
+                    break
+                else:
+                    print(f"[SKIPPED] Not a valid PDF: {url}")
+                    print(f"Status: {r.status_code}, Content-Type: {content_type}, First bytes: {first_bytes}")
+                    break
+            except requests.exceptions.RequestException as e:
+                print(f"[ERROR] {url} failed (Attempt {attempt + 1}): {e}")
+                if attempt < retries - 1:
+                    time.sleep(backoff * (attempt + 1))
+                else:
+                    print(f"[FAILURE] All retries failed for {url}")
     return file_paths
-
 
 def merge_pdfs(pdf_paths, output_path):
     merger = PdfMerger()
@@ -159,6 +169,23 @@ def upload_pdf():
     except Exception as e:
         print(f"[ERROR] {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
+def cleanup_old_files(folder_path, age_minutes=30):
+    now = time.time()
+    cutoff = now - (age_minutes * 60)
+
+    deleted_files = 0
+    for filename in os.listdir(folder_path):
+        file_path = os.path.join(folder_path, filename)
+        if os.path.isfile(file_path):
+            file_modified_time = os.path.getmtime(file_path)
+            if file_modified_time < cutoff:
+                try:
+                    os.remove(file_path)
+                    print(f"[CLEANUP] Deleted old file: {file_path}")
+                    deleted_files += 1
+                except Exception as e:
+                    print(f"[ERROR] Couldn't delete {file_path}: {e}")
+    print(f"[CLEANUP] Total files deleted from {folder_path}: {deleted_files}")
 
 @app.route('/download/<filename>', methods=['GET'])
 def download_file(filename):
@@ -172,4 +199,5 @@ def download_file(filename):
         return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, port=8000)
+    port = int(os.environ.get("PORT", 8000))
+    app.run(host='0.0.0.0', port=port)
