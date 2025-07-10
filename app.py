@@ -204,5 +204,5 @@ def download_file(filename):
         return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 8000))
-    app.run(host='0.0.0.0', port=port)
+    port = int(os.environ.get("PORT", 8000))  # MUST use environment PORT
+    app.run(host='0.0.0.0', port=port)        # MUST bind to 0.0.0.0
